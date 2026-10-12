@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0b1017" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>省钱进度看板</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./config.js"></script>
+<style>
+  :root {
+    --bg0: #070b12;
+    --bg1: #0f1623;
+    --card: rgba(26, 35, 50, 0.88);
+    --card-solid: #161e2c;
+    --text: #eef3fb;
+    --muted: #8fa0b8;
+    --accent: #3dd68c;
+    --accent-dim: rgba(61, 214, 140, 0.18);
+    --accent2: #5b8cff;
+    --accent2-dim: rgba(91, 140, 255, 0.18);
+    --warn: #ffb020;
+    --warn-dim: rgba(255, 176, 32, 0.16);
+    --danger: #ff6b7a;
+    --line: rgba(255, 255, 255, 0.08);
+    --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    --radius: 18px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    line-height: 1.55;
+    background:
+      radial-gradient(900px 480px at 10% -10%, rgba(91, 140, 255, 0.22), transparent 55%),
+      radial-gradient(700px 420px at 100% 0%, rgba(61, 214, 140, 0.14), transparent 50%),
+      linear-gradient(180deg, var(--bg1), var(--bg0));
+    background-attachment: fixed;
+    padding: 18px 14px calc(36px + var(--safe-b));
+    min-height: 100%;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  .hero {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: clamp(1.25rem, 4.5vw, 1.55rem);
+    margin: 0 0 4px;
+    letter-spacing: 0.02em;
+    font-weight: 750;
+  }
+  .sub { color: var(--muted); font-size: 0.88rem; margin: 0; }
+  .pill {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid rgba(61, 214, 140, 0.28);
+    padding: 6px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .pill.warn {
+    color: var(--warn);
+    background: var(--warn-dim);
+    border-color: rgba(255, 176, 32, 0.3);
+  }
+
+  .grid { display: grid; gap: 12px; }
+  @media (min-width: 640px) { .grid.two { grid-template-columns: 1fr 1fr; } }
+
+  .card {
+    background: var(--card);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px 16px 14px;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: "";
+    position: absolute; inset: 0 auto auto 0; width: 100%; height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+    opacity: 0.5;
+  }
+  .card.goal-a::after {
+    content: "";
+    position: absolute; right: -40px; top: -40px; width: 120px; height: 120px;
+    background: radial-gradient(circle, rgba(61,214,140,0.18), transparent 70%);
+    pointer-events: none;
+  }
+  .card.goal-b::after {
+    content: "";
+    position: absolute; right: -40px; top: -40px; width: 120px; height: 120px;
+    background: radial-gradient(circle, rgba(91,140,255,0.2), transparent 70%);
+    pointer-events: none;
+  }
+
+  .label {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-bottom: 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block;
+  }
+  .dot.a { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .dot.b { background: var(--accent2); box-shadow: 0 0 10px var(--accent2); }
+
+  .big {
+    font-size: clamp(1.45rem, 5vw, 1.75rem);
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .bar {
+    height: 12px;
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 12px 0 8px;
+    border: 1px solid var(--line);
+    position: relative;
+  }
+  .fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative;
+  }
+  .fill.a {
+    background: linear-gradient(90deg, #1f9d63, var(--accent));
+    box-shadow: 0 0 16px rgba(61, 214, 140, 0.45);
+  }
+  .fill.b {
+    background: linear-gradient(90deg, #3a68d8, var(--accent2));
+    box-shadow: 0 0 16px rgba(91, 140, 255, 0.45);
+  }
+  .fill::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+    transform: translateX(-100%);
+    animation: shimmer 2.4s ease-in-out infinite;
+  }
+  @keyframes shimmer {
+    0%, 40% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .meta {
+    display: flex; justify-content: space-between; gap: 8px;
+    color: var(--muted); font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .motivate {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.03);
+    font-size: 0.92rem;
+    display: flex; gap: 10px; align-items: flex-start;
+    transition: background 0.3s ease, border-color 0.3s ease;
+  }
+  .motivate .emoji { font-size: 1.25rem; line-height: 1.2; flex-shrink: 0; }
+  .motivate .body { flex: 1; min-width: 0; }
+  .motivate .title { font-weight: 650; margin-bottom: 2px; }
+  .motivate .desc { color: var(--muted); font-size: 0.85rem; }
+  .motivate.good {
+    background: var(--accent-dim);
+    border-color: rgba(61, 214, 140, 0.28);
+  }
+  .motivate.good .title { color: var(--accent); }
+  .motivate.mid {
+    background: var(--accent2-dim);
+    border-color: rgba(91, 140, 255, 0.28);
+  }
+  .motivate.mid .title { color: #9bb8ff; }
+  .motivate.warn {
+    background: var(--warn-dim);
+    border-color: rgba(255, 176, 32, 0.3);
+  }
+  .motivate.warn .title { color: var(--warn); }
+
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-top: 4px;
+  }
+  label {
+    display: flex; flex-direction: column; gap: 5px;
+    font-size: 0.8rem; color: var(--muted);
+    flex: 1 1 120px;
+  }
+  input, button {
+    font: inherit;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--text);
+    padding: 11px 12px;
+    min-height: 44px;
+    width: 100%;
+  }
+  input:focus {
+    outline: none;
+    border-color: rgba(91, 140, 255, 0.55);
+    box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.18);
+  }
+  input[type="date"] { color-scheme: dark; }
+  .btn-row {
+    display: flex; gap: 8px; flex: 1 1 100%;
+    margin-top: 2px;
+  }
+  button {
+    background: linear-gradient(135deg, #4a7cff, var(--accent2));
+    border: none;
+    color: #fff;
+    font-weight: 650;
+    cursor: pointer;
+    box-shadow: 0 8px 20px rgba(91, 140, 255, 0.28);
+    transition: transform 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
+    flex: 1;
+  }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.55; cursor: wait; }
+  button.secondary {
+    background: rgba(42, 53, 72, 0.9);
+    box-shadow: none;
+  }
+  #msg {
+    margin-top: 10px; min-height: 1.35em; font-size: 0.88rem;
+  }
+  #msg.ok { color: var(--accent); }
+  #msg.err { color: var(--warn); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+  th, td {
+    padding: 10px 6px;
+    border-bottom: 1px solid var(--line);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.78rem; }
+  tbody tr { transition: background 0.15s ease; }
+  tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .ok-text { color: var(--accent); }
+  .over { color: var(--warn); }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; }
+
+  /* 登录页：未验证前主界面完全不渲染可见内容 */
+  #loginPage {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px calc(24px + var(--safe-b));
+  }
+  #loginPage.hidden { display: none !important; }
+  #app { display: none; }
+  #app.visible { display: block; }
+  body.authed { padding: 18px 14px calc(36px + var(--safe-b)); }
+  body:not(.authed) { padding: 0; }
+
+  .login-card {
+    width: 100%; max-width: 380px;
+    background: var(--card-solid);
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 28px 22px 22px;
+    box-shadow: var(--shadow);
+    position: relative;
+    overflow: hidden;
+  }
+  .login-card::before {
+    content: "";
+    position: absolute; inset: 0 auto auto 0; width: 100%; height: 3px;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+  }
+  .login-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 0.75rem; color: var(--accent2);
+    background: var(--accent2-dim);
+    border: 1px solid rgba(91,140,255,0.28);
+    padding: 5px 10px; border-radius: 999px;
+    margin-bottom: 14px;
+  }
+  .login-card h2 { margin: 0 0 6px; font-size: 1.35rem; }
+  .login-card .lead { margin: 0 0 18px; color: var(--muted); font-size: 0.9rem; }
+  .login-card label { margin-bottom: 10px; width: 100%; }
+  .login-card .row { display: flex; flex-direction: column; gap: 10px; }
+  .login-card button { width: 100%; min-height: 48px; }
+  #gateMsg { margin-top: 12px; min-height: 1.2em; font-size: 0.88rem; color: var(--warn); }
+  #gateMsg.ok { color: var(--accent); }
+
+  .loading-skel {
+    opacity: 0.55;
+    pointer-events: none;
+  }
+
+  @media (max-width: 420px) {
+    body { padding: 14px 12px calc(28px + var(--safe-b)); }
+    .card { padding: 14px; border-radius: 16px; }
+    .btn-row { flex-direction: column; }
+    button { width: 100%; }
+  }
+</style>
+</head>
+<body>
+  <div id="loginPage">
+    <div class="login-card">
+      <div class="login-badge">🔒 需要密码</div>
+      <h2>省钱进度看板</h2>
+      <p class="lead">请先输入访问密码。验证通过后才能查看进度、明细和记账。密码只保存在本会话，关掉标签页需再输一次。</p>
+      <div class="row">
+        <label>访问密码
+          <input type="password" id="pinInput" placeholder="输入密码" autocomplete="current-password" inputmode="text" />
+        </label>
+        <button type="button" id="pinBtn">验证并进入</button>
+      </div>
+      <div id="gateMsg"></div>
+    </div>
+  </div>
+
+  <div class="wrap" id="app" aria-hidden="true">
+    <div class="hero">
+      <div>
+        <h1>省钱进度看板</h1>
+        <p class="sub">每天 18 元额度（不含地铁）· 数据云端同步</p>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div class="pill" id="syncPill">未连接</div>
+        <button type="button" class="secondary" id="logoutBtn" style="min-width:auto;width:auto;padding:6px 12px;min-height:34px;font-size:0.78rem;box-shadow:none">退出登录</button>
+      </div>
+    </div>
+
+    <div class="grid two" id="mainUi">
+      <div class="card goal-a">
+        <div class="label"><span class="dot a"></span>目标一 · 额外省出 1000 元</div>
+        <div class="big" id="saveNow">—</div>
+        <div class="bar"><div class="fill a" id="saveBar"></div></div>
+        <div class="meta"><span id="savePct">0%</span><span id="saveRemain">还差 —</span></div>
+      </div>
+      <div class="card goal-b">
+        <div class="label"><span class="dot b"></span>目标二 · 银行凑到 10000 元</div>
+        <div class="big" id="bankNow">—</div>
+        <div class="bar"><div class="fill b" id="bankBar"></div></div>
+        <div class="meta"><span id="bankPct">0%</span><span id="bankRemain">还差 —</span></div>
+      </div>
+    </div>
+
+    <div class="motivate mid" id="motivate" style="margin-top:12px">
+      <div class="emoji" id="motEmoji">🌱</div>
+      <div class="body">
+        <div class="title" id="motTitle">准备好了</div>
+        <div class="desc" id="motDesc">登录并加载数据后，这里会给你一句贴心的进度反馈。</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="label">今日记账</div>
+      <div class="controls">
+        <label>日期
+          <input type="date" id="date" />
+        </label>
+        <label>除地铁外花费（元）
+          <input type="number" id="spend" step="0.1" value="0" inputmode="decimal" />
+        </label>
+        <label>银行实际余额（可选）
+          <input type="number" id="bankBal" step="1" placeholder="有变动再填" inputmode="decimal" />
+        </label>
+        <div class="btn-row">
+          <button type="button" id="saveBtn">保存并更新</button>
+          <button type="button" class="secondary" id="refreshBtn">刷新数据</button>
+        </div>
+      </div>
+      <div id="msg"></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="label">明细</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>花费</th>
+              <th>额度</th>
+              <th>今日结余</th>
+              <th>累计已省</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var PIN_KEY = 'money-tracker-pin';
+  var DEFAULTS = {
+    daily_budget: 18,
+    save_goal: 1000,
+    bank_goal: 10000,
+    bank_balance: 3000,
+    access_code: 'money2026'
+  };
+
+  var client = null;
+  var settings = Object.assign({}, DEFAULTS);
+  var entries = {}; // date -> amount
+  var lastSavedDate = null;
+  var authenticated = false;
+
+  function $(id) { return document.getElementById(id); }
+
+  function todayStr() {
+    var d = new Date();
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  function readConfig() {
+    var params = new URLSearchParams(location.search);
+    var cfg = (window.MONEY_TRACKER_CONFIG || {});
+    var url = params.get('url') || cfg.SUPABASE_URL || '';
+    var key = params.get('key') || cfg.SUPABASE_ANON_KEY || '';
+    return { url: String(url).trim(), key: String(key).trim() };
+  }
+
+  function setMsg(text, ok) {
+    var el = $('msg');
+    el.textContent = text || '';
+    el.className = ok ? 'ok' : 'err';
+  }
+
+  function setPill(text, warn) {
+    var el = $('syncPill');
+    el.textContent = text;
+    el.className = warn ? 'pill warn' : 'pill';
+  }
+
+  function sortedDates(obj) {
+    return Object.keys(obj).sort();
+  }
+
+  function savedUpTo(untilDate) {
+    var saved = 0;
+    var dates = sortedDates(entries);
+    var daily = Number(settings.daily_budget) || 18;
+    for (var i = 0; i < dates.length; i++) {
+      var d = dates[i];
+      if (untilDate && d > untilDate) break;
+      saved += daily - Number(entries[d]);
+    }
+    return saved;
+  }
+
+  /** 激励文案：按今日结余 + 累计进度分档 */
+  function buildMotivation(focusDate) {
+    var daily = Number(settings.daily_budget) || 18;
+    var saveGoal = Number(settings.save_goal) || 1000;
+    var bank = Number(settings.bank_balance) || 0;
+    var bankGoal = Number(settings.bank_goal) || 10000;
+    var total = savedUpTo(null);
+    var pct = saveGoal > 0 ? total / saveGoal : 0;
+    var date = focusDate || lastSavedDate || todayStr();
+    var hasToday = Object.prototype.hasOwnProperty.call(entries, date);
+    var spend = hasToday ? Number(entries[date]) : null;
+    var surplus = spend == null ? null : (daily - spend);
+
+    var emoji = '🌱';
+    var title = '慢慢来，也很好';
+    var desc = '每一天都算数。记一笔，进度条就会动起来。';
+    var level = 'mid';
+
+    if (surplus != null && surplus < 0) {
+      level = 'warn';
+      var over = Math.abs(surplus);
+      if (over <= 5) {
+        emoji = '🍵';
+        title = '今天稍微超了一点，没关系';
+        desc = '超了 ' + over.toFixed(1) + ' 元。明天少买一杯小东西，很容易补回来。';
+      } else if (over <= 20) {
+        emoji = '🌤';
+        title = '今天松了一点，别对自己太狠';
+        desc = '超了 ' + over.toFixed(1) + ' 元。省钱是长跑，偶尔松口气很正常，明天收一点就行。';
+      } else {
+        emoji = '🛟';
+        title = '花多了也不丢人';
+        desc = '今天超了 ' + over.toFixed(1) + ' 元。先记清楚，后面几天按额度走，曲线会慢慢回来。';
+      }
+    } else if (surplus != null && surplus === 0) {
+      level = 'good';
+      emoji = '✨';
+      title = '刚好花完额度，拿捏得正好';
+      desc = '今天结余 0，稳稳的。累计已省 ' + total.toFixed(1) + ' 元。';
+    } else if (surplus != null && surplus > 0) {
+      level = 'good';
+      if (surplus >= 15) {
+        emoji = '🏆';
+        title = '今天几乎没怎么花，太能扛了';
+        desc = '结余 ' + surplus.toFixed(1) + ' 元进罐。累计已省 ' + total.toFixed(1) + ' / ' + saveGoal + '。';
+      } else if (surplus >= 8) {
+        emoji = '💪';
+        title = '今天又往前挪了一大步';
+        desc = '结余 ' + surplus.toFixed(1) + ' 元。离 1000 还差 ' + Math.max(0, saveGoal - total).toFixed(1) + ' 元。';
+      } else {
+        emoji = '🌿';
+        title = '今天守住了，辛苦啦';
+        desc = '结余 ' + surplus.toFixed(1) + ' 元。小步也算赢，累计 ' + total.toFixed(1) + ' 元。';
+      }
+    }
+
+    // 累计里程碑压过「普通达标」文案（超支仍优先温和提醒）
+    if (!(surplus != null && surplus < 0)) {
+      if (pct >= 1) {
+        level = 'good';
+        emoji = '🎉';
+        title = '额外省 1000 元目标达成！';
+        desc = '你做到了。银行进度现在是 ' + bank.toFixed(0) + ' / ' + bankGoal + '，继续冲。';
+      } else if (pct >= 0.75) {
+        level = 'good';
+        emoji = '🚀';
+        title = '已经走过四分之三了';
+        desc = '累计 ' + total.toFixed(1) + ' 元，终点就在眼前，别停。';
+      } else if (pct >= 0.5) {
+        level = 'good';
+        emoji = '⭐';
+        title = '过半了，状态很稳';
+        desc = '累计 ' + total.toFixed(1) + ' 元。后半程你比想象中更能坚持。';
+      } else if (pct >= 0.25 && (surplus == null || surplus >= 0)) {
+        level = 'mid';
+        emoji = '🔥';
+        title = '开了个好头';
+        desc = '已完成约 ' + (pct * 100).toFixed(0) + '%。习惯一旦养成，后面会轻松很多。';
+      }
+    }
+
+    if (bank >= bankGoal) {
+      level = 'good';
+      emoji = '🏦';
+      title = '银行 10000 门槛也到了！';
+      desc = '双目标都在线。给自己点个赞，再想想下一步想安全感放哪。';
+    }
+
+    return { emoji: emoji, title: title, desc: desc, level: level };
+  }
+
+  function applyMotivation(focusDate) {
+    var m = buildMotivation(focusDate);
+    var box = $('motivate');
+    box.className = 'motivate ' + m.level;
+    $('motEmoji').textContent = m.emoji;
+    $('motTitle').textContent = m.title;
+    $('motDesc').textContent = m.desc;
+  }
+
+  function render(focusDate) {
+    if (!authenticated) return;
+    var saveGoal = Number(settings.save_goal) || 1000;
+    var bankGoal = Number(settings.bank_goal) || 10000;
+    var daily = Number(settings.daily_budget) || 18;
+    var saved = savedUpTo(null);
+    var bank = Number(settings.bank_balance) || 0;
+    var savePct = Math.max(0, Math.min(100, saveGoal ? saved / saveGoal * 100 : 0));
+    var bankPct = Math.max(0, Math.min(100, bankGoal ? bank / bankGoal * 100 : 0));
+
+    $('saveNow').textContent = saved.toFixed(1) + ' / ' + saveGoal;
+    // force reflow for animation when same width
+    var sb = $('saveBar');
+    sb.style.width = '0%';
+    void sb.offsetWidth;
+    sb.style.width = savePct + '%';
+    $('savePct').textContent = savePct.toFixed(1) + '%';
+    $('saveRemain').textContent = saved >= saveGoal ? '已达成' : ('还差 ' + (saveGoal - saved).toFixed(1));
+
+    $('bankNow').textContent = bank.toFixed(0) + ' / ' + bankGoal;
+    var bb = $('bankBar');
+    bb.style.width = '0%';
+    void bb.offsetWidth;
+    bb.style.width = bankPct + '%';
+    $('bankPct').textContent = bankPct.toFixed(1) + '%';
+    $('bankRemain').textContent = bank >= bankGoal ? '已达成' : ('还差 ' + (bankGoal - bank).toFixed(0));
+
+    var tbody = $('tbody');
+    tbody.innerHTML = '';
+    var dates = sortedDates(entries).reverse();
+    if (!dates.length) {
+      var empty = document.createElement('tr');
+      empty.innerHTML = '<td colspan="6" style="text-align:center;color:var(--muted)">还没有记录</td>';
+      tbody.appendChild(empty);
+    }
+    for (var i = 0; i < dates.length; i++) {
+      var d = dates[i];
+      var spend = Number(entries[d]);
+      var surplus = daily - spend;
+      var running = savedUpTo(d);
+      var tr = document.createElement('tr');
+      var status = surplus >= 0
+        ? '<span class="ok-text">达标</span>'
+        : '<span class="over">超支</span>';
+      tr.innerHTML =
+        '<td>' + d + '</td>' +
+        '<td>' + spend + '</td>' +
+        '<td>' + daily + '</td>' +
+        '<td>' + surplus.toFixed(1) + '</td>' +
+        '<td>' + running.toFixed(1) + '</td>' +
+        '<td>' + status + '</td>';
+      tbody.appendChild(tr);
+    }
+
+    applyMotivation(focusDate);
+  }
+
+  function mapSettings(rows) {
+    var s = Object.assign({}, DEFAULTS);
+    (rows || []).forEach(function (r) {
+      if (!r || r.k == null) return;
+      var numKeys = { daily_budget: 1, save_goal: 1, bank_goal: 1, bank_balance: 1 };
+      if (numKeys[r.k]) s[r.k] = Number(r.v);
+      else s[r.k] = String(r.v);
+    });
+    return s;
+  }
+
+  async function loadAll() {
+    if (!authenticated) {
+      showLogin('请先验证密码');
+      return;
+    }
+    setPill('同步中…');
+    $('app').classList.add('loading-skel');
+    try {
+      var settRes = await client.from('settings').select('k,v');
+      if (settRes.error) throw settRes.error;
+      settings = mapSettings(settRes.data);
+
+      var spendRes = await client
+        .from('daily_spend')
+        .select('spend_date,amount')
+        .order('spend_date', { ascending: true });
+      if (spendRes.error) throw spendRes.error;
+
+      entries = {};
+      (spendRes.data || []).forEach(function (r) {
+        entries[r.spend_date] = Number(r.amount);
+      });
+
+      setPill('已同步');
+      setMsg('数据已从云端加载', true);
+      render(lastSavedDate || todayStr());
+    } catch (e) {
+      console.error(e);
+      setPill('同步失败', true);
+      setMsg('加载失败：' + (e.message || e), false);
+    } finally {
+      $('app').classList.remove('loading-skel');
+    }
+  }
+
+  async function saveEntry() {
+    var date = $('date').value;
+    var spendRaw = $('spend').value;
+    if (!date) { setMsg('请选择日期', false); return; }
+    if (spendRaw === '' || isNaN(Number(spendRaw))) {
+      setMsg('请填写花费数字，可以为 0', false);
+      return;
+    }
+    var amount = Number(spendRaw);
+    var bankRaw = $('bankBal').value;
+    var updateBank = bankRaw !== '';
+    if (updateBank && isNaN(Number(bankRaw))) {
+      setMsg('银行余额请填数字', false);
+      return;
+    }
+
+    $('saveBtn').disabled = true;
+    setMsg('正在保存…', true);
+    try {
+      var up = await client.from('daily_spend').upsert(
+        { spend_date: date, amount: amount, updated_at: new Date().toISOString() },
+        { onConflict: 'spend_date' }
+      );
+      if (up.error) throw up.error;
+
+      if (updateBank) {
+        var bankVal = String(Number(bankRaw));
+        var bu = await client.from('settings').upsert(
+          { k: 'bank_balance', v: bankVal },
+          { onConflict: 'k' }
+        );
+        if (bu.error) throw bu.error;
+        settings.bank_balance = Number(bankRaw);
+      }
+
+      entries[date] = amount;
+      lastSavedDate = date;
+      $('bankBal').value = '';
+      render(date);
+      setPill('已同步');
+      setMsg('已保存，进度已更新', true);
+    } catch (e) {
+      console.error(e);
+      setMsg('保存失败：' + (e.message || e), false);
+      setPill('保存失败', true);
+    } finally {
+      $('saveBtn').disabled = false;
+    }
+  }
+
+  function showLogin(msg) {
+    authenticated = false;
+    entries = {};
+    lastSavedDate = null;
+    settings = Object.assign({}, DEFAULTS);
+    document.body.classList.remove('authed');
+    $('loginPage').classList.remove('hidden');
+    $('app').classList.remove('visible');
+    $('app').setAttribute('aria-hidden', 'true');
+    try {
+      $('saveNow').textContent = '—';
+      $('bankNow').textContent = '—';
+      $('saveBar').style.width = '0%';
+      $('bankBar').style.width = '0%';
+      $('savePct').textContent = '0%';
+      $('bankPct').textContent = '0%';
+      $('saveRemain').textContent = '还差 —';
+      $('bankRemain').textContent = '还差 —';
+      $('tbody').innerHTML = '';
+      $('motTitle').textContent = '请先登录';
+      $('motDesc').textContent = '验证通过后才会加载进度与明细。';
+      $('syncPill').textContent = '未登录';
+      $('syncPill').className = 'pill warn';
+      $('msg').textContent = '';
+    } catch (e) {}
+    if (msg) {
+      $('gateMsg').textContent = msg;
+      $('gateMsg').className = '';
+    }
+  }
+
+  function showApp() {
+    authenticated = true;
+    document.body.classList.add('authed');
+    $('loginPage').classList.add('hidden');
+    $('app').classList.add('visible');
+    $('app').setAttribute('aria-hidden', 'false');
+    $('date').value = todayStr();
+  }
+
+  /** 只拉 access_code 做校验，通过前不拉花费明细、不展示看板 */
+  async function fetchAccessCode() {
+    var res = await client.from('settings').select('v').eq('k', 'access_code').maybeSingle();
+    if (res.error) throw res.error;
+    if (!res.data || res.data.v == null) {
+      var cfgCode = (window.MONEY_TRACKER_CONFIG && window.MONEY_TRACKER_CONFIG.ACCESS_CODE) || DEFAULTS.access_code;
+      return String(cfgCode);
+    }
+    return String(res.data.v);
+  }
+
+  async function verifyPin(pin) {
+    var expected = await fetchAccessCode();
+    return pin === expected;
+  }
+
+  async function enterApp(pin) {
+    try { sessionStorage.setItem(PIN_KEY, pin); } catch (e) {}
+    showApp();
+    $('gateMsg').textContent = '';
+    await loadAll();
+  }
+
+  function logout() {
+    try { sessionStorage.removeItem(PIN_KEY); } catch (e) {}
+    showLogin('已退出。再次进入请输入密码。');
+    $('gateMsg').className = 'ok';
+    $('pinInput').value = '';
+    try { $('pinInput').focus(); } catch (e) {}
+  }
+
+  async function tryLogin(pin) {
+    pin = (pin || '').trim();
+    if (!pin) {
+      $('gateMsg').textContent = '请输入密码';
+      $('gateMsg').className = '';
+      return false;
+    }
+    if (!client) {
+      $('gateMsg').textContent = '尚未配置云端连接，请先填 config.js';
+      return false;
+    }
+    var ok = await verifyPin(pin);
+    if (!ok) {
+      entries = {};
+      $('gateMsg').textContent = '密码不对，无法进入。请重试。';
+      $('gateMsg').className = '';
+      try { sessionStorage.removeItem(PIN_KEY); } catch (e) {}
+      return false;
+    }
+    await enterApp(pin);
+    return true;
+  }
+
+  async function boot() {
+    showLogin('');
+
+    var cfg = readConfig();
+    if (!cfg.url || !cfg.key || cfg.url.indexOf('YOUR_PROJECT') >= 0 || cfg.key.indexOf('YOUR_') === 0) {
+      $('gateMsg').textContent = '请先填写 config.js 里的 SUPABASE_URL 和 SUPABASE_ANON_KEY，或用 ?url=&key= 参数打开。';
+      return;
+    }
+
+    if (!window.supabase || !window.supabase.createClient) {
+      $('gateMsg').textContent = 'Supabase 脚本加载失败，请检查网络后刷新。';
+      return;
+    }
+
+    client = window.supabase.createClient(cfg.url, cfg.key);
+
+    $('pinBtn').onclick = async function () {
+      $('pinBtn').disabled = true;
+      $('gateMsg').textContent = '正在验证…';
+      $('gateMsg').className = '';
+      try {
+        await tryLogin($('pinInput').value);
+      } catch (e) {
+        showLogin('验证失败：' + (e.message || e));
+      } finally {
+        $('pinBtn').disabled = false;
+      }
+    };
+
+    $('pinInput').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') $('pinBtn').click();
+    });
+
+    var cached = '';
+    try { cached = sessionStorage.getItem(PIN_KEY) || ''; } catch (e) {}
+    if (cached) {
+      $('gateMsg').textContent = '正在恢复会话…';
+      $('gateMsg').className = 'ok';
+      try {
+        var ok = await tryLogin(cached);
+        if (!ok) {
+          try { sessionStorage.removeItem(PIN_KEY); } catch (e2) {}
+        }
+      } catch (e) {
+        try { sessionStorage.removeItem(PIN_KEY); } catch (e2) {}
+        showLogin('会话恢复失败，请重新输入密码。');
+      }
+    }
+  }
+
+  var _origSave = saveEntry;
+  saveEntry = async function () {
+    if (!authenticated) { showLogin('请先验证密码'); return; }
+    return _origSave();
+  };
+
+  $('saveBtn').onclick = function () { saveEntry(); };
+  $('refreshBtn').onclick = function () {
+    if (!authenticated) { showLogin('请先验证密码'); return; }
+    loadAll();
+  };
+  $('logoutBtn').onclick = function () { logout(); };
+
+  boot();
+})();
+</script>
+</body>
+</html>
